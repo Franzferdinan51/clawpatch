@@ -44,9 +44,9 @@ clawpatch doctor
 
 ## Provider setup
 
-clawpatch requires an AI provider for code review. The default is the local Codex CLI.
+clawpatch requires an AI harness CLI for code review. The default is the local Codex CLI.
 
-### Codex CLI
+### Codex CLI (default)
 
 Install the Codex CLI so `codex --version` works locally. If available in your
 environment:
@@ -60,6 +60,26 @@ Verify:
 ```bash
 codex --version
 clawpatch doctor
+```
+
+### DuckHive
+
+Install the DuckHive CLI so `duckhive --version` works locally.
+
+See [DuckHive](https://github.com/Franzferdinan51/DuckHive) for installation instructions.
+
+```bash
+clawpatch review --provider duckhive
+```
+
+### OpenClaude
+
+Install the OpenClaude CLI so `openclaude --version` works locally.
+
+See [OpenClaude](https://github.com/Gitlawb/openclaude) for installation instructions.
+
+```bash
+clawpatch review --provider openclaude
 ```
 
 `clawpatch doctor` checks that the configured provider is available and can execute test queries.

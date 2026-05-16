@@ -57,26 +57,66 @@ validation commands and records a patch attempt under `.clawpatch/`.
 
 Deeper framework mappers and agent-assisted enrichment are next steps.
 
-## Provider
+## Providers (Harnesses)
 
-The default provider is the local Codex CLI.
+clawpatch is an orchestration tool that hands off AI work to external harness CLIs.
+It builds prompts, manages state, and parses structured JSON output — but the actual
+AI analysis is done by the harness binary.
+
+| Name | CLI | Notes |
+|------|-----|-------|
+| `codex` | `codex exec` | Structured JSON via `--output-schema`. Default. |
+| `duckhive` | `duckhive` | DuckHive AI harness. Pipes prompt via stdin. |
+| `openclaude` | `openclaude` | OpenClaude open-source agent. Uses `-p` print mode. |
+| `mock` | — | Test fixture. |
+| `mock-fail` | — | Test fixture (always fails). |
+
+### How providers work
+
+Each provider shells out to a CLI binary:
+
+1. clawpatch builds a detailed prompt
+2. The provider runs the CLI binary via `child_process.spawn`
+3. The CLI handles all AI interaction (API calls, model selection, etc.)
+4. The CLI returns structured JSON
+5. clawpatch validates and persists the results
+
+This means you need the corresponding CLI installed for each provider.
+
+### Switching providers
+
+Config file (`clawpatch.config.json`):
+
+```json
+{
+  "provider": { "name": "duckhive", "model": null }
+}
+```
+
+Environment variables:
 
 ```bash
-codex --version
+CLAWPATCH_PROVIDER=duckhive
+CLAWPATCH_MODEL=your-model-name
+```
+
+CLI flag (per-command):
+
+```bash
+clawpatch review --provider duckhive --limit 3
+clawpatch fix --finding <id> --provider openclaude
+clawpatch revalidate --all --provider codex
+```
+
+Precedence: CLI flag > env var > config file > default (`codex`).
+
+Check provider availability:
+
+```bash
 clawpatch doctor
 ```
 
-Provider calls use `codex exec` with strict JSON schemas. Review and revalidate
-run read-only; fix planning runs with workspace-write because Codex may edit the
-working tree during the explicit fix command.
-
-Supported provider names today:
-
-- `codex`: local Codex CLI
-- `mock`: deterministic test provider
-- `mock-fail`: failure test provider
-
-Direct OpenAI, Claude, Gemini, and provider panels are not implemented yet.
+All providers honour `--model <name>` on `review`, `fix`, and `revalidate`.
 
 ## Commands
 

@@ -11,6 +11,10 @@ import {
   reviewOutputSchema,
   revalidateOutputSchema,
 } from "./types.js";
+import {
+  duckhiveProvider,
+  openclaudeProvider,
+} from "./providers/index.js";
 
 export type Provider = {
   name: string;
@@ -20,18 +24,9 @@ export type Provider = {
   revalidate(root: string, prompt: string, model: string | null): Promise<RevalidateOutput>;
 };
 
-export function providerByName(name: string): Provider {
-  if (name === "codex") {
-    return codexProvider;
-  }
-  if (name === "mock") {
-    return mockProvider;
-  }
-  if (name === "mock-fail") {
-    return mockFailProvider;
-  }
-  throw new ClawpatchError(`unsupported provider: ${name}`, 2, "unsupported-provider");
-}
+// ---------------------------------------------------------------------------
+// Built-in providers
+// ---------------------------------------------------------------------------
 
 const codexProvider: Provider = {
   name: "codex",
@@ -137,6 +132,45 @@ const mockFailProvider: Provider = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Provider registry
+// ---------------------------------------------------------------------------
+
+const providerRegistry = new Map<string, Provider>([
+  ["codex", codexProvider],
+  ["duckhive", duckhiveProvider],
+  ["openclaude", openclaudeProvider],
+  ["mock", mockProvider],
+  ["mock-fail", mockFailProvider],
+]);
+
+export function providerByName(name: string): Provider {
+  const provider = providerRegistry.get(name);
+  if (provider !== undefined) {
+    return provider;
+  }
+  const available = [...providerRegistry.keys()].join(", ");
+  throw new ClawpatchError(
+    `unsupported provider: ${name}. available: ${available}`,
+    2,
+    "unsupported-provider",
+  );
+}
+
+/** Register a custom provider at runtime (for plugins/extensions). */
+export function registerProvider(provider: Provider): void {
+  providerRegistry.set(provider.name, provider);
+}
+
+/** List all registered provider names. */
+export function listProviders(): string[] {
+  return [...providerRegistry.keys()];
+}
+
+// ---------------------------------------------------------------------------
+// Codex execution helpers
+// ---------------------------------------------------------------------------
+
 async function runCodexJson(
   root: string,
   prompt: string,
@@ -178,6 +212,10 @@ function providerExitCode(stderr: string): number {
   }
   return 1;
 }
+
+// ---------------------------------------------------------------------------
+// JSON schemas for Codex --output-schema
+// ---------------------------------------------------------------------------
 
 const reviewJsonSchema = {
   type: "object",

@@ -10,7 +10,10 @@ This guide walks through a complete review workflow from initialization to fixin
 ## Prerequisites
 
 - [Install clawpatch](install.md)
-- Install Codex CLI: `brew install codex`
+- Install a harness CLI (one of):
+  - Codex CLI (default): `brew install codex`
+  - DuckHive: see [DuckHive](https://github.com/Franzferdinan51/DuckHive)
+  - OpenClaude: see [OpenClaude](https://github.com/Gitlawb/openclaude)
 - Have a project with code to review
 
 ## 1. Initialize
