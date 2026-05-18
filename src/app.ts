@@ -6,8 +6,9 @@ import { detectProject } from "./detect.js";
 import { ClawpatchError, assertDefined } from "./errors.js";
 import { runCommand } from "./exec.js";
 import { nowIso, writeJson } from "./fs.js";
-import { discoverGit, findProjectRoot } from "./git.js";
+import { discoverGit, findProjectRoot, commitChanges, createPullRequest } from "./git.js";
 import { stableId, runId } from "./id.js";
+import { createLogger, Logger } from "./log.js";
 import { mapFeatures } from "./mapper.js";
 import { providerByName } from "./provider.js";
 import { buildFixPrompt, buildReviewPrompt, buildRevalidatePrompt } from "./prompt.js";
@@ -40,21 +41,25 @@ import {
 export type AppContext = {
   root: string;
   options: GlobalOptions;
+  logger: Logger;
 };
 
 export async function makeContext(options: GlobalOptions): Promise<AppContext> {
-  return { root: await findProjectRoot(process.cwd(), options.root), options };
+  const logger = createLogger(options);
+  return { root: await findProjectRoot(process.cwd(), options.root), options, logger };
 }
 
 export async function initCommand(
   context: AppContext,
   flags: Record<string, string | boolean>,
 ): Promise<unknown> {
+  context.logger.debug(`init: root=${context.root}`);
   const config = await loadConfig(context.root, context.options);
   const stateDir = resolveStateDir(context.root, config);
   const paths = statePaths(stateDir);
   await ensureStateDirs(paths);
   const project = await detectProject(context.root);
+  context.logger.verbose(`detected: ${project.detected.languages.join(", ")} / ${project.detected.frameworks.join(", ")}`);
   const detectedConfig = { ...config, commands: project.detected.commands };
   const previous = await readProject(paths);
   if (previous !== null && flags["force"] !== true) {
@@ -78,7 +83,9 @@ export async function mapCommand(
 ): Promise<unknown> {
   const loaded = await loadProjectState(context);
   const existing = await readFeatures(loaded.paths);
-  const result = await mapFeatures(loaded.root, loaded.project, existing);
+  context.logger.debug(`map: ${existing.length} existing features, exclude=[${loaded.config.exclude.join(", ")}]`);
+  const result = await mapFeatures(loaded.root, loaded.project, existing, loaded.config.exclude);
+  context.logger.verbose(`mapped: ${result.features.length} features (${result.created} new, ${result.changed} changed, ${result.stale} stale)`);
   const activeFeatureIds = new Set(result.features.map((feature) => feature.featureId));
   if (flags["dryRun"] === true) {
     return {
@@ -542,6 +549,7 @@ export async function fixCommand(
   const loaded = await loadProjectState(context);
   const findingId = assertDefined(stringFlag(flags, "finding"), "missing --finding");
   const config = applyProviderFlags(loaded.config, flags);
+  context.logger.debug(`fix: finding=${findingId}, provider=${config.provider.name}, model=${config.provider.model ?? "default"}`);
   const git = await discoverGit(loaded.root);
   const dirty = await hasSourceDirtyWorktree(loaded.root, loaded.paths.stateDir);
   if (config.git.requireCleanWorktreeForFix && dirty && flags["dryRun"] !== true) {
@@ -555,6 +563,17 @@ export async function fixCommand(
     await readFinding(loaded.paths, findingId),
     `finding not found: ${findingId}`,
   );
+  context.logger.verbose(`fixing: ${finding.title} (${finding.confidence} confidence)`);
+  const confidenceRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+  const findingRank = confidenceRank[finding.confidence] ?? 0;
+  const minRank = confidenceRank[config.review.minConfidenceToFix] ?? 0;
+  if (findingRank < minRank) {
+    throw new ClawpatchError(
+      `finding confidence ${finding.confidence} below minConfidenceToFix ${config.review.minConfidenceToFix}`,
+      2,
+      "confidence-below-threshold",
+    );
+  }
   const features = await readFeatures(loaded.paths);
   const feature = assertDefined(
     features.find((candidate) => candidate.featureId === finding.featureId),
@@ -659,6 +678,35 @@ export async function fixCommand(
   if (failed) {
     throw new ClawpatchError("validation failed after applying fix", 6, "validation-failed");
   }
+
+  // Auto-commit if enabled
+  let commitSha: string | null = null;
+  if (config.git.commit) {
+    const commitMessage = `fix(clawpatch): ${finding.title}\n\nFinding: ${finding.findingId}\nPatch: ${patchAttemptId}`;
+    const commitResult = await commitChanges(loaded.root, commitMessage);
+    if (commitResult.success) {
+      commitSha = commitResult.sha;
+      context.logger.verbose(`committed: ${commitSha ?? "unknown"}`);
+    } else {
+      context.logger.warn("auto-commit failed");
+    }
+  }
+
+  // Auto-open PR if enabled
+  let prUrl: string | null = null;
+  if (config.git.openPr) {
+    const prResult = await createPullRequest(loaded.root, {
+      title: `fix(clawpatch): ${finding.title}`,
+      body: `Automated fix by clawpatch\n\nFinding: ${finding.findingId}\nPatch: ${patchAttemptId}`,
+    });
+    if (prResult.success) {
+      prUrl = prResult.url;
+      context.logger.verbose(`PR created: ${prUrl ?? "unknown"}`);
+    } else {
+      context.logger.warn(`PR creation failed: ${prResult.error ?? "unknown error"}`);
+    }
+  }
+
   return {
     finding: finding.findingId,
     dryRun: false,
@@ -673,6 +721,8 @@ export async function fixCommand(
         : commandsRun
             .map((result) => `${result.command} => ${result.exitCode ?? "unknown"}`)
             .join("; "),
+    commitSha,
+    prUrl,
     next: failed
       ? `inspect ${patchAttemptId}`
       : `clawpatch revalidate --finding ${finding.findingId}`,
@@ -896,13 +946,10 @@ function emitReviewProgress(
   event: string,
   fields: Record<string, string | number | boolean>,
 ): void {
-  if (context.options.quiet) {
-    return;
-  }
   const values = Object.entries(fields)
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(" ");
-  process.stderr.write(`clawpatch review ${event}${values.length > 0 ? ` ${values}` : ""}\n`);
+  context.logger.verbose(`review ${event}${values.length > 0 ? ` ${values}` : ""}`);
 }
 
 function lockFeature(feature: FeatureRecord, currentRunId: string): FeatureRecord {

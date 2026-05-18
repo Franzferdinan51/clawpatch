@@ -77,3 +77,46 @@ async function gitText(cwd: string, command: string): Promise<string> {
   const result = await runCommand(command, cwd);
   return result.exitCode === 0 ? result.stdout : "";
 }
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
+export async function commitChanges(
+  root: string,
+  message: string,
+): Promise<{ sha: string | null; success: boolean }> {
+  await runCommand("git add -A", root);
+  const result = await runCommand(
+    `git -c commit.gpgsign=false commit -m ${shellQuote(message)}`,
+    root,
+  );
+  if (result.exitCode !== 0) {
+    return { sha: null, success: false };
+  }
+  const shaResult = await runCommand("git rev-parse HEAD", root);
+  return {
+    sha: shaResult.exitCode === 0 ? shaResult.stdout.trim() : null,
+    success: true,
+  };
+}
+
+export async function createPullRequest(
+  root: string,
+  options: { title: string; body: string; base?: string },
+): Promise<{ url: string | null; success: boolean; error?: string }> {
+  const branchName = `clawpatch/fix-${Date.now()}`;
+  const checkoutResult = await runCommand(`git checkout -b ${branchName}`, root);
+  if (checkoutResult.exitCode !== 0) {
+    return { url: null, success: false, error: "failed to create branch" };
+  }
+  const ghResult = await runCommand(
+    `gh pr create --title ${shellQuote(options.title)} --body ${shellQuote(options.body)}${options.base ? ` --base ${options.base}` : ""}`,
+    root,
+  );
+  if (ghResult.exitCode === 0) {
+    const url = ghResult.stdout.trim();
+    return { url: url.length > 0 ? url : null, success: true };
+  }
+  return { url: null, success: false, error: ghResult.stderr || "gh pr create failed" };
+}

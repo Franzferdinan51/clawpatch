@@ -1,8 +1,8 @@
 import { walk } from "./shared.js";
 import { FeatureSeed } from "./types.js";
 
-export async function nextSeeds(root: string): Promise<FeatureSeed[]> {
-  const files = await walk(root, ["app", "pages"]);
+export async function nextSeeds(root: string, excludePatterns?: string[]): Promise<FeatureSeed[]> {
+  const files = await walk(root, ["app", "pages"], excludePatterns);
   const routeFiles = files.filter(
     (file) =>
       /(^|\/)(page|route)\.(tsx|ts|jsx|js)$/u.test(file) ||

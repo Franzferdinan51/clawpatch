@@ -14,20 +14,25 @@ export async function nearbyTests(
   entryPath: string,
   testCommand: string | null,
   seedTestPrefixes: string[],
+  excludePatterns?: string[],
 ): Promise<TestRef[]> {
   const dir = dirname(entryPath);
   const base = entryPath.replace(/\.[^.]+$/u, "");
   const rustTestPrefixes = rustTestPrefixesForEntry(entryPath);
-  const all = await walk(root, [
-    dir === "." ? "" : dir,
-    "test",
-    "Tests",
-    "tests",
-    "__tests__",
-    "src",
-    ...rustTestPrefixes,
-    ...seedTestPrefixes,
-  ]);
+  const all = await walk(
+    root,
+    [
+      dir === "." ? "" : dir,
+      "test",
+      "Tests",
+      "tests",
+      "__tests__",
+      "src",
+      ...rustTestPrefixes,
+      ...seedTestPrefixes,
+    ],
+    excludePatterns,
+  );
   const stem =
     entryPath
       .split("/")
@@ -62,7 +67,11 @@ export async function nearbyTests(
   return tests.map((path) => ({ path, command: testCommand }));
 }
 
-export async function walk(root: string, prefixes: string[]): Promise<string[]> {
+export async function walk(
+  root: string,
+  prefixes: string[],
+  excludePatterns?: string[],
+): Promise<string[]> {
   const files: string[] = [];
   const seen = new Set<string>();
   const seenRoots = new Set<string>();
@@ -82,7 +91,7 @@ export async function walk(root: string, prefixes: string[]): Promise<string[]> 
     }
     const rel = normalize(relative(realRoot, canonicalStart));
     if (info.isFile()) {
-      if (!seen.has(rel) && !shouldSkip(rel)) {
+      if (!seen.has(rel) && !shouldSkip(rel, excludePatterns)) {
         seen.add(rel);
         files.push(rel);
       }
@@ -92,7 +101,7 @@ export async function walk(root: string, prefixes: string[]): Promise<string[]> 
       continue;
     }
     seenRoots.add(canonicalStart);
-    await walkDir(realRoot, canonicalStart, files, seen);
+    await walkDir(realRoot, canonicalStart, files, seen, excludePatterns);
   }
   return files.toSorted();
 }
@@ -102,6 +111,7 @@ async function walkDir(
   dir: string,
   files: string[],
   seen: Set<string>,
+  excludePatterns?: string[],
 ): Promise<void> {
   const dirInfo = await lstat(dir);
   if (dirInfo.isSymbolicLink()) {
@@ -112,14 +122,14 @@ async function walkDir(
     return;
   }
   const relDir = normalize(relative(root, dir));
-  if (shouldSkip(relDir)) {
+  if (shouldSkip(relDir, excludePatterns)) {
     return;
   }
   const entries = await readdir(dir);
   for (const entry of entries) {
     const full = join(dir, entry);
     const rel = normalize(relative(root, full));
-    if (seen.has(rel) || shouldSkip(rel)) {
+    if (seen.has(rel) || shouldSkip(rel, excludePatterns)) {
       continue;
     }
     seen.add(rel);
@@ -128,7 +138,7 @@ async function walkDir(
       continue;
     }
     if (info.isDirectory()) {
-      await walkDir(root, full, files, seen);
+      await walkDir(root, full, files, seen, excludePatterns);
     } else if (info.isFile()) {
       files.push(rel);
     }
@@ -164,9 +174,12 @@ export function pathInsideRoot(root: string, path: string): boolean {
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-export function shouldSkip(path: string): boolean {
+export function shouldSkip(path: string, excludePatterns?: string[]): boolean {
   if (path === "") {
     return false;
+  }
+  if (excludePatterns !== undefined && excludePatterns.length > 0) {
+    return excludePatterns.some((pattern) => matchesGlob(path, pattern));
   }
   return (
     /(^|\/)(node_modules|dist|build|coverage|\.git|\.clawpatch)(\/|$)/u.test(path) ||
@@ -175,6 +188,39 @@ export function shouldSkip(path: string): boolean {
     path === ".build" ||
     path.startsWith(".build/")
   );
+}
+
+export function matchesGlob(path: string, pattern: string): boolean {
+  const normalizedPattern = pattern.replace(/\\/gu, "/");
+  const normalizedPath = path.replace(/\\/gu, "/");
+
+  // dir/** — matches everything under dir/
+  if (normalizedPattern.endsWith("/**")) {
+    const prefix = normalizedPattern.slice(0, -3);
+    return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`);
+  }
+
+  // **/*.ext — matches files with extension anywhere
+  const extMatch = /^\*\*\/\*\.(.+)$/u.exec(normalizedPattern);
+  if (extMatch !== null) {
+    const ext = extMatch[1];
+    return normalizedPath.endsWith(`.${ext}`);
+  }
+
+  // **/* — matches everything
+  if (normalizedPattern === "**/*") {
+    return true;
+  }
+
+  // *.ext — matches files with extension at root level
+  const rootExtMatch = /^\*\.(.+)$/u.exec(normalizedPattern);
+  if (rootExtMatch !== null) {
+    const ext = rootExtMatch[1];
+    return normalizedPath.endsWith(`.${ext}`) && !normalizedPath.includes("/");
+  }
+
+  // Exact match or prefix match
+  return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern}/`);
 }
 
 export function packageKind(name: string): FeatureSeed["kind"] {

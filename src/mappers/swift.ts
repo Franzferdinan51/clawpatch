@@ -10,7 +10,7 @@ import {
 } from "./shared.js";
 import { FeatureSeed } from "./types.js";
 
-export async function swiftSeeds(root: string): Promise<FeatureSeed[]> {
+export async function swiftSeeds(root: string, excludePatterns?: string[]): Promise<FeatureSeed[]> {
   if (!(await pathExists(join(root, "Package.swift")))) {
     return [];
   }
@@ -25,7 +25,9 @@ export async function swiftSeeds(root: string): Promise<FeatureSeed[]> {
     );
   const customSourcePathPrefixes = manifestTargets.sourcePaths.flatMap(swiftPathPrefixes);
   const testPathPrefixes = ["Tests", ...customTestPathPrefixes];
-  const sourceFiles = (await walk(root, ["Sources", ...customSourcePathPrefixes])).filter(
+  const sourceFiles = (
+    await walk(root, ["Sources", ...customSourcePathPrefixes], excludePatterns)
+  ).filter(
     (file) =>
       file.endsWith(".swift") &&
       file !== "Package.swift" &&
@@ -71,7 +73,9 @@ export async function swiftSeeds(root: string): Promise<FeatureSeed[]> {
       ),
     });
   }
-  const testFiles = (await walk(root, ["Tests", ...customTestPathPrefixes])).filter(
+  const testFiles = (
+    await walk(root, ["Tests", ...customTestPathPrefixes], excludePatterns)
+  ).filter(
     (file) =>
       file.endsWith(".swift") &&
       !sourcePathClaimsFile(file) &&

@@ -31,5 +31,5 @@ export type FeatureSeed = {
 
 export type FeatureMapper = {
   name: string;
-  map(root: string): Promise<FeatureSeed[]>;
+  map(root: string, excludePatterns?: string[]): Promise<FeatureSeed[]>;
 };

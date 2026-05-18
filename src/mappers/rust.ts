@@ -11,7 +11,7 @@ import {
 } from "./shared.js";
 import { FeatureSeed } from "./types.js";
 
-export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
+export async function rustSeeds(root: string, excludePatterns?: string[]): Promise<FeatureSeed[]> {
   if (!(await pathExists(join(root, "Cargo.toml")))) {
     return [];
   }
@@ -26,12 +26,12 @@ export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
     seeds.push(rustLibrarySeed("src/lib.rs", packageName, rustTestCommand));
   }
   if (rootHasPackage) {
-    for (const file of (await walk(root, ["src/bin"])).filter((candidate) =>
+    for (const file of (await walk(root, ["src/bin"], excludePatterns)).filter((candidate) =>
       /^src\/bin\/([^/]+\.rs|[^/]+\/main\.rs)$/u.test(candidate),
     )) {
       seeds.push(rustCommandSeed(file, rustBinCommand(file), rustTestCommand));
     }
-    for (const file of (await walk(root, ["tests"])).filter((candidate) =>
+    for (const file of (await walk(root, ["tests"], excludePatterns)).filter((candidate) =>
       /^tests\/[^/]+\.rs$/u.test(candidate),
     )) {
       const name = file.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";
@@ -50,10 +50,10 @@ export async function rustSeeds(root: string): Promise<FeatureSeed[]> {
     if (await isSafeFile(root, join(root, memberLib))) {
       seeds.push(rustLibrarySeed(memberLib, memberName, member.testCommand));
     }
-    for (const file of (await walk(root, [`${memberDir}/src/bin`])).filter(isRustBinFile)) {
+    for (const file of (await walk(root, [`${memberDir}/src/bin`], excludePatterns)).filter(isRustBinFile)) {
       seeds.push(rustCommandSeed(file, rustBinCommand(file), member.testCommand));
     }
-    for (const file of (await walk(root, [`${memberDir}/tests`])).filter((candidate) =>
+    for (const file of (await walk(root, [`${memberDir}/tests`], excludePatterns)).filter((candidate) =>
       /\/tests\/[^/]+\.rs$/u.test(candidate),
     )) {
       const name = file.split("/").at(-1)?.replace(/\.rs$/u, "") ?? "integration";

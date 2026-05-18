@@ -30,8 +30,9 @@ export async function mapFeatures(
   root: string,
   project: ProjectRecord,
   existing: FeatureRecord[],
+  excludePatterns?: string[],
 ): Promise<MapResult> {
-  const seeds = await collectSeeds(root);
+  const seeds = await collectSeeds(root, excludePatterns);
   const existingById = new Map(existing.map((feature) => [feature.featureId, feature]));
   const features: FeatureRecord[] = [];
   let created = 0;
@@ -142,8 +143,10 @@ function uniqueTests(tests: Array<{ path: string; command: string | null }>): Ar
   return output;
 }
 
-async function collectSeeds(root: string): Promise<FeatureSeed[]> {
-  const groups = await Promise.all(featureMappers.map((mapper) => mapper.map(root)));
+async function collectSeeds(root: string, excludePatterns?: string[]): Promise<FeatureSeed[]> {
+  const groups = await Promise.all(
+    featureMappers.map((mapper) => mapper.map(root, excludePatterns)),
+  );
   return dedupeSeeds(groups.flat());
 }
 
